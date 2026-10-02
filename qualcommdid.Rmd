@@ -101,7 +101,97 @@ print(head(final_panel, 10))
 ```
 
 
-#### Step 3. DiD Analysis
+#### Step 3. Visualization 1
+
+```{r}
+# ==============================================================================
+# FIGURE 1: RAW QUARTERLY SEGMENT OPERATING MARGINS (2014-2025)
+# Visual Exploratory Analysis with Historical Event Annotations
+# ==============================================================================
+
+library(tidyverse)
+library(scales)
+
+# 1. Load and Prepare Dataset
+df <- read_csv("Qualcomm_Segment_DiD_Full_Panel_2014_2025.csv") %>%
+  mutate(
+    end_date = as.Date(end_date),
+    segment  = factor(segment, levels = c("QCT", "QTL")) # QCT control, QTL treatment
+  )
+
+# 2. Key Historical Event Dates
+ndrc_date    <- as.Date("2015-02-10") # 2015 Q1: Chinese NDRC Fine ($975M)
+kftc_date    <- as.Date("2016-12-28") # 2016 Q4 / 2017 Q1: KFTC Fine ($1.03T KRW) & Apple Holdout
+apple_settle <- as.Date("2019-04-16") # 2019 Q2: Apple Global Settlement & Catch-up Payments
+supreme_ct   <- as.Date("2023-04-13") # 2023 Q2: SK Supreme Court Final Ruling
+
+# 3. Construct Graph 1
+g1_raw_margins <- ggplot(df, aes(x = end_date, y = segment_operating_margin, color = segment, group = segment)) +
+  
+  # Raw Data Lines and Points
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 2.2) +
+  
+  # Vertical Reference Lines for Historical Events
+  geom_vline(xintercept = ndrc_date, linetype = "dotted", color = "gray40", linewidth = 0.7) +
+  geom_vline(xintercept = kftc_date, linetype = "dashed", color = "firebrick", linewidth = 0.8) +
+  geom_vline(xintercept = apple_settle, linetype = "dashed", color = "darkgreen", linewidth = 0.8) +
+  geom_vline(xintercept = supreme_ct, linetype = "dashed", color = "navy", linewidth = 0.8) +
+  
+  # Text Annotations for Major Historical Milestones
+  annotate("text", x = ndrc_date, y = 92, 
+           label = "2015 Q1\nNDRC Fine\n($975M USD)", 
+           color = "gray30", fontface = "bold", size = 3.0, hjust = 1.1) +
+  
+  annotate("text", x = kftc_date, y = 92, 
+           label = "2016 Q4 / 2017 Q1\nKFTC Fine ($854M USD)\n& Apple Royalty Holdout", 
+           color = "firebrick", fontface = "bold", size = 3.0, hjust = -0.05) +
+  
+  annotate("text", x = apple_settle, y = 92, 
+           label = "2019 Q2\nApple Settlement\n& Catch-up Payments", 
+           color = "darkgreen", fontface = "bold", size = 3.0, hjust = -0.05) +
+  
+  annotate("text", x = supreme_ct, y = 92, 
+           label = "2023 Q2\nSupreme Court\nFinal Ruling", 
+           color = "navy", fontface = "bold", size = 3.0, hjust = -0.05) +
+  
+  # Color Palette & Axis Customization
+  scale_color_manual(
+    values = c("QCT" = "#2B5C8F", "QTL" = "#D95F02"),
+    labels = c("QCT (Control: Semiconductor Hardware)", "QTL (Treated: Technology Licensing)")
+  ) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, 100), breaks = seq(0, 100, 20)) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  
+  # Labels and Headings
+  labs(
+    title = "Figure 1: Raw Quarterly Segment Operating Margins (2014–2025)",
+    subtitle = "Visual Exploratory Analysis: QTL Licensing vs. QCT Hardware Across Major Antitrust Milestones",
+    x = "Fiscal Quarter Observation Date",
+    y = "Segment Operating Margin (%)",
+    color = "Reporting Segment",
+    caption = "Data Source: Qualcomm Form 10-Q / 10-K SEC Filings."
+  ) +
+  
+  # Publication Theme
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(color = "gray30", size = 10)
+  )
+
+# Display Plot
+print(g1_raw_margins)
+
+# Save High-Resolution PNG for Paper Export
+ggsave("Figure1_Raw_Segment_Operating_Margins.png", plot = g1_raw_margins, width = 11, height = 6.5, dpi = 300)
+```
+
+
+#### Step 4. DiD Analysis
 
 ##### Model 1: Pooled OLS Specification
 \begin{equation}
@@ -266,7 +356,7 @@ modelsummary(
 ```
 
 
-#### Step 4. Visualization
+#### Step 5. Visualization 2
 
 ```{r}
 library(tidyverse)
@@ -285,7 +375,7 @@ kftc_fine_date   <- as.Date("2016-12-28") # Initial KFTC Fine Announcement
 supreme_ct_date  <- as.Date("2023-04-13") # Final Supreme Court Decision
 
 # ==============================================================================
-# FIGURE 1: PARALLEL TRENDS & SEGMENT MARGIN TIME SERIES (2014-2025)
+# FIGURE 2: PARALLEL TRENDS & SEGMENT MARGIN TIME SERIES (2014-2025)
 # ==============================================================================
 
 p1_trends <- ggplot(df, aes(x = end_date, y = segment_operating_margin, color = segment, group = segment)) +
@@ -321,7 +411,7 @@ p1_trends <- ggplot(df, aes(x = end_date, y = segment_operating_margin, color = 
   scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, 95)) +
   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
   labs(
-    title = "Figure 1: Segment Operating Margin Dynamics Across KFTC Policy Regimes",
+    title = "Figure 2: Segment Operating Margin Dynamics Across KFTC Policy Regimes",
     subtitle = "Comparing Treated Licensing (QTL) vs. Control Semiconductor (QCT) Segments (2014-2025)",
     x = "Fiscal Quarter",
     y = "Segment Operating Margin (%)",
@@ -339,7 +429,7 @@ p1_trends <- ggplot(df, aes(x = end_date, y = segment_operating_margin, color = 
 print(p1_trends)
 
 # ==============================================================================
-# FIGURE 2: DYNAMIC EVENT-STUDY DIFFERENCE-IN-DIFFERENCES PLOT
+# FIGURE 3: DYNAMIC EVENT-STUDY DIFFERENCE-IN-DIFFERENCES PLOT
 # ==============================================================================
 
 # 1. Estimate Dynamic Event-Study Model (using robust SEs to avoid NA bounds)
@@ -375,7 +465,7 @@ p2_event_study <- ggplot(es_data, aes(x = quarter, y = estimate)) +
   scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
   scale_y_continuous(labels = function(x) paste0(x, " pp")) +
   labs(
-    title = "Figure 2: Dynamic Event-Study Impact of KFTC Sanction on QTL Margin",
+    title = "Figure 3: Dynamic Event-Study Impact of KFTC Sanction on QTL Margin",
     subtitle = "Relative to Baseline Quarter 2016 Q4 (95% Confidence Intervals)",
     x = "Quarter",
     y = "Treatment Effect on Margin (Percentage Points)",
@@ -393,7 +483,7 @@ print(p2_event_study)
 # SAVE PLOTS TO LOCAL FILE DIRECTORY (HIGH RESOLUTION)
 # ==============================================================================
 
-ggsave("Figure1_Parallel_Trends_Qualcomm.png", plot = p1_trends, width = 10, height = 6, dpi = 300)
-ggsave("Figure2_Event_Study_Qualcomm.png", plot = p2_event_study, width = 10, height = 6, dpi = 300)
+ggsave("Figure2_Parallel_Trends_Qualcomm.png", plot = p1_trends, width = 10, height = 6, dpi = 300)
+ggsave("Figure3_Event_Study_Qualcomm.png", plot = p2_event_study, width = 10, height = 6, dpi = 300)
 ```
 
