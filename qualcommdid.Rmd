@@ -98,3 +98,167 @@ print(head(final_panel, 10))
 ```
 
 
+#### Step 3. DiD Analysis
+
+##### Model 1: Pooled OLS Specification
+\begin{equation}
+\text{Margin}_{st} = \beta_0 + \beta_1 \text{Limbo}_t + \beta_2 \text{Finalized}_t + \beta_3 \text{QTL}_s + \beta_4 (\text{QTL}_s \times \text{Limbo}_t) + \beta_5 (\text{QTL}_s \times \text{Finalized}_t) + \varepsilon_{st}
+\end{equation}
+
+##### Model 2: Two-Way Fixed Effects (TWFE) Specification (Primary Model)
+\begin{equation}
+\text{Margin}_{st} = \alpha_s + \lambda_t + \beta_4 (\text{QTL}_s \times \text{Limbo}_t) + \beta_5 (\text{QTL}_s \times \text{Finalized}_t) + \varepsilon_{st}
+\end{equation}
+
+```{r}
+# ==============================================================================
+# DIFFERENCE-IN-DIFFERENCES ANALYSIS & REPORTING SCRIPT
+# Project: Qualcomm KFTC Antitrust Impact Assessment (2014-2025)
+# ==============================================================================
+
+# 1. LOAD REQUIRED PACKAGES
+# ------------------------------------------------------------------------------
+required_packages <- c("tidyverse", "fixest", "modelsummary", "vtable", "car", "sandwich")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
+library(tidyverse)
+library(fixest)       # High-performance fixed-effects estimation
+library(modelsummary) # Publication-ready regression & summary tables
+library(vtable)       # Fast descriptive statistics
+library(car)          # Linear hypothesis testing (Wald tests)
+library(sandwich)     # Robust and HAC standard errors
+
+# 2. LOAD & PREPARE DATASET
+# ------------------------------------------------------------------------------
+df <- read_csv("Qualcomm_Segment_DiD_Full_Panel_2014_2025.csv") %>%
+  mutate(
+    end_date         = as.Date(end_date),
+    segment          = factor(segment, levels = c("QCT", "QTL")), # QCT as baseline control
+    treatment_period = factor(treatment_period, levels = c("Pre-treatment", "Limbo", "Finalized")),
+    log_revenue      = log(revenue),
+    log_income       = log(pmax(operating_income, 1)) # Handle positive earnings
+  )
+
+# ==============================================================================
+# 3. DESCRIPTIVE STATISTICS
+# ==============================================================================
+
+# A. Console Output: Summary Statistics by Segment and Regime
+cat("\n===================================================================\n")
+cat("          DESCRIPTIVE STATISTICS BY SEGMENT & POLICY REGIME         \n")
+cat("===================================================================\n\n")
+
+summary_stats <- df %>%
+  group_by(segment, treatment_period) %>%
+  summarise(
+    N               = n(),
+    Mean_Margin     = mean(segment_operating_margin, na.rm = TRUE),
+    SD_Margin       = sd(segment_operating_margin, na.rm = TRUE),
+    Mean_Rev_Mil    = mean(revenue, na.rm = TRUE),
+    Mean_Income_Mil = mean(operating_income, na.rm = TRUE),
+    .groups         = "drop"
+  )
+
+print(summary_stats)
+
+# B. Exportable Formatted Descriptive Statistics Table (HTML / LaTeX / Text)
+# Generates a publication-quality balance/summary table
+datasummary_balance(
+  ~ segment,
+  data = df %>% select(segment, revenue, operating_income, segment_operating_margin),
+  fmt = 2,
+  title = "Table 1: Summary Statistics by Segment (QCT Control vs. QTL Treated)",
+  output = "default" # Renders cleanly in RStudio Viewer; change to "markdown" or "latex" as needed
+)
+
+# ==============================================================================
+# 4. ESTIMATE DIFFERENCE-IN-DIFFERENCES MODELS
+# ==============================================================================
+
+# Model 1: Pooled OLS Model
+m1_pooled <- feols(
+  segment_operating_margin ~ is_qtl + limbo_dummy + finalized_dummy + qtl_x_limbo + qtl_x_finalized,
+  data = df,
+  vcov = "hetero" # Heteroskedasticity-robust standard errors (HC1)
+)
+
+# Model 2: Two-Way Fixed Effects (TWFE) - Main Preferred Model
+# Controls for Segment Fixed Effects and Quarter-Time Fixed Effects
+m2_twfe <- feols(
+  segment_operating_margin ~ qtl_x_limbo + qtl_x_finalized | segment + end_date,
+  data = df,
+  panel.id = ~segment + end_date, # Set panel dimensions here
+  vcov = NW(2)                    # Newey-West HAC standard errors with 2 lags
+)
+
+# Model 3: Robustness Check - Log Segment Revenue Dependent Variable
+m3_log_rev <- feols(
+  log_revenue ~ qtl_x_limbo + qtl_x_finalized | segment + end_date,
+  data = df,
+  panel.id = ~segment + end_date,
+  vcov = NW(2)
+)
+
+# ==============================================================================
+# 5. POST-ESTIMATION HYPOTHESIS TESTING (H0: β_limbo = β_finalized)
+# ==============================================================================
+
+cat("\n===================================================================\n")
+cat("   WALD TEST: DIFFERENCE BETWEEN LIMBO & FINALIZED EFFECTS (β4 vs β5) \n")
+cat("===================================================================\n\n")
+
+# Test whether the post-Supreme Court impact (β5) is statistically different from Limbo (β4)
+wald_test <- wald(m2_twfe, keep = "qtl_x_finalized - qtl_x_limbo = 0")
+print(wald_test)
+
+# ==============================================================================
+# 6. REGRESSION RESULTS TABLE GENERATION
+# ==============================================================================
+
+# Custom labels for variables and models
+var_map <- c(
+  "qtl_x_limbo"     = "QTL × Limbo Period (β4)",
+  "qtl_x_finalized" = "QTL × Finalized Period (β5)",
+  "is_qtl"          = "QTL Segment Dummy",
+  "limbo_dummy"     = "Limbo Period Dummy",
+  "finalized_dummy" = "Finalized Period Dummy",
+  "(Intercept)"     = "Constant"
+)
+
+models_list <- list(
+  "(1) Pooled OLS"      = m1_pooled,
+  "(2) TWFE (Margin)"   = m2_twfe,
+  "(3) TWFE (Log Rev)"  = m3_log_rev
+)
+
+# A. Console / ASCII Regression Table Output
+cat("\n===================================================================\n")
+cat("              DIFFERENCE-IN-DIFFERENCES REGRESSION TABLE            \n")
+cat("===================================================================\n\n")
+
+etable(
+  m1_pooled, m2_twfe, m3_log_rev,
+  headers = c("Pooled OLS", "TWFE Main (Margin)", "Robustness (Log Rev)"),
+  dict    = var_map,
+  se.below = TRUE,
+  fitstat = ~ n + r2 + ar2 # Uses valid 'ar2' formula for Adjusted R-squared
+)
+
+# B. Publication-Quality Formatted Table Output (HTML/LaTeX/Markdown)
+# Change output argument to "latex", "html", or "word" to export directly
+modelsummary(
+  models_list,
+  coef_map = var_map,
+  stars    = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map  = c("nobs", "r.squared", "adj.r.squared"),
+  title    = "Table 2: Difference-in-Differences Estimation of KFTC Ruling on Qualcomm Operating Margins",
+  notes    = c(
+    "Newey-West HAC standard errors in parentheses.",
+    "Pre-treatment Baseline: 2014 Q1 - 2016 Q4.",
+    "Limbo Period: 2017 Q1 - 2023 Q1; Finalized Period: 2023 Q2 - 2025 Q4."
+  ),
+  output   = "default"
+)
+```
+
