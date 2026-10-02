@@ -2,7 +2,10 @@
 title: "qualcommdid"
 author: "Seungho Choi"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
 ---
 
 #### Step 1. Run the code in the Console below if not installed:
