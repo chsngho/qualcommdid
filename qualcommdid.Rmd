@@ -1,0 +1,9 @@
+---
+title: "qualcommdid"
+author: "Seungho Choi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+#### Step 1. Run the code below if not installed:
+install.packages(c("httr", "jsonlite", "dplyr", "tidyr", "lubridate"))
