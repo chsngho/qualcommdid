@@ -265,3 +265,135 @@ modelsummary(
 )
 ```
 
+
+#### Step 4. Visualization
+
+```{r}
+library(tidyverse)
+library(fixest)
+library(scales)
+
+# Load dataset
+df <- read_csv("Qualcomm_Segment_DiD_Full_Panel_2014_2025.csv") %>%
+  mutate(
+    end_date = as.Date(end_date),
+    segment  = factor(segment, levels = c("QCT", "QTL"))
+  )
+
+# Key Policy Dates for Reference Lines
+kftc_fine_date   <- as.Date("2016-12-28") # Initial KFTC Fine Announcement
+supreme_ct_date  <- as.Date("2023-04-13") # Final Supreme Court Decision
+
+# ==============================================================================
+# FIGURE 1: PARALLEL TRENDS & SEGMENT MARGIN TIME SERIES (2014-2025)
+# ==============================================================================
+
+p1_trends <- ggplot(df, aes(x = end_date, y = segment_operating_margin, color = segment, group = segment)) +
+  # Policy Regime Background Shading
+  annotate("rect", xmin = min(df$end_date), xmax = kftc_fine_date, ymin = -Inf, ymax = Inf,
+           fill = "gray90", alpha = 0.4) +
+  annotate("rect", xmin = kftc_fine_date, xmax = supreme_ct_date, ymin = -Inf, ymax = Inf,
+           fill = "lightgoldenrodyellow", alpha = 0.5) +
+  annotate("rect", xmin = supreme_ct_date, xmax = max(df$end_date), ymin = -Inf, ymax = Inf,
+           fill = "lightblue1", alpha = 0.3) +
+  
+  # Vertical Policy Intervention Lines
+  geom_vline(xintercept = kftc_fine_date, linetype = "dashed", color = "firebrick", linewidth = 0.8) +
+  geom_vline(xintercept = supreme_ct_date, linetype = "dashed", color = "darkblue", linewidth = 0.8) +
+  
+  # Data Lines and Points
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  
+  # Policy Regime Text Annotations
+  annotate("text", x = as.Date("2015-06-01"), y = 88, label = "Pre-Treatment\nBaseline", 
+           fontface = "bold", size = 3.5, color = "gray30") +
+  annotate("text", x = as.Date("2020-01-01"), y = 88, label = "Limbo Appellate Period\n(2017 - 2023)", 
+           fontface = "bold", size = 3.5, color = "darkgoldenrod4") +
+  annotate("text", x = as.Date("2024-06-01"), y = 88, label = "Finalized Ruling\n(2023 - 2025)", 
+           fontface = "bold", size = 3.5, color = "navy") +
+  
+  # Formatting & Labels
+  scale_color_manual(
+    values = c("QCT" = "#2B5C8F", "QTL" = "#D95F02"),
+    labels = c("QCT (Control: Hardware)", "QTL (Treated: Licensing)")
+  ) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, 95)) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(
+    title = "Figure 1: Segment Operating Margin Dynamics Across KFTC Policy Regimes",
+    subtitle = "Comparing Treated Licensing (QTL) vs. Control Semiconductor (QCT) Segments (2014-2025)",
+    x = "Fiscal Quarter",
+    y = "Segment Operating Margin (%)",
+    color = "Business Segment",
+    caption = "Data Source: Qualcomm SEC Form 10-Q / 10-K Filings."
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top",
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "gray30", size = 11)
+  )
+
+print(p1_trends)
+
+# ==============================================================================
+# FIGURE 2: DYNAMIC EVENT-STUDY DIFFERENCE-IN-DIFFERENCES PLOT
+# ==============================================================================
+
+# 1. Estimate Dynamic Event-Study Model (using robust SEs to avoid NA bounds)
+m_event_study <- feols(
+  segment_operating_margin ~ i(end_date, is_qtl, ref = as.Date("2016-12-31")) | segment + end_date,
+  data = df,
+  vcov = "hetero"
+)
+
+# 2. Extract Coefficients and Clean Data Frame
+es_data <- broom::tidy(m_event_study, conf.int = TRUE) %>%
+  filter(str_detect(term, "end_date::")) %>%
+  mutate(
+    quarter = as.Date(str_extract(term, "\\d{4}-\\d{2}-\\d{2}"))
+  ) %>%
+  # Add omitted reference period (2016 Q4)
+  bind_rows(tibble(
+    term = "end_date::2016-12-31:is_qtl",
+    estimate = 0, std.error = 0, statistic = 0, p.value = 1,
+    conf.low = 0, conf.high = 0, quarter = as.Date("2016-12-31")
+  )) %>%
+  filter(!is.na(estimate)) %>%
+  arrange(quarter)
+
+# 3. Render High-Resolution Event-Study Plot
+p2_event_study <- ggplot(es_data, aes(x = quarter, y = estimate)) +
+  geom_hline(yintercept = 0, linetype = "solid", color = "gray50", linewidth = 0.6) +
+  geom_vline(xintercept = as.Date("2016-12-28"), linetype = "dashed", color = "firebrick", linewidth = 0.8) +
+  geom_vline(xintercept = as.Date("2023-04-13"), linetype = "dashed", color = "darkblue", linewidth = 0.8) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), fill = "steelblue", alpha = 0.2) +
+  geom_line(color = "darkblue", linewidth = 0.9) +
+  geom_point(color = "darkblue", size = 2) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  scale_y_continuous(labels = function(x) paste0(x, " pp")) +
+  labs(
+    title = "Figure 2: Dynamic Event-Study Impact of KFTC Sanction on QTL Margin",
+    subtitle = "Relative to Baseline Quarter 2016 Q4 (95% Confidence Intervals)",
+    x = "Quarter",
+    y = "Treatment Effect on Margin (Percentage Points)",
+    caption = "Heteroskedasticity-robust standard errors. Vertical lines denote KFTC Fine (2016) and Supreme Court Ruling (2023)."
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", size = 13)
+  )
+
+print(p2_event_study)
+
+# ==============================================================================
+# SAVE PLOTS TO LOCAL FILE DIRECTORY (HIGH RESOLUTION)
+# ==============================================================================
+
+ggsave("Figure1_Parallel_Trends_Qualcomm.png", plot = p1_trends, width = 10, height = 6, dpi = 300)
+ggsave("Figure2_Event_Study_Qualcomm.png", plot = p2_event_study, width = 10, height = 6, dpi = 300)
+```
+
